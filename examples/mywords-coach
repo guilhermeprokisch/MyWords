@@ -1,0 +1,65 @@
+#!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Guilherme Prokisch
+# mywords-coach — turn your recent typing into a language-coaching report.
+#
+# Assembles the last N days of captured text and a coaching prompt (English +
+# Portuguese + German + study topics), then runs it through Claude. If the
+# `claude` CLI isn't on PATH, it prints the prompt so you can paste it or use it
+# in a scheduled job.
+#
+# Usage: ./mywords-coach [--days N]     (default 7)
+#
+# NOTE: this sends your recent decrypted text to Claude for analysis — that's
+# the point, but be aware the text leaves your machine.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+DAYS=7
+[ "${1:-}" = "--days" ] && DAYS="${2:-7}"
+
+EXPORT="build/mywords-export"
+[ -x "$EXPORT" ] || EXPORT="./.build/release/mywords-export"
+[ -x "$EXPORT" ] || { echo "build first: ./build.sh" >&2; exit 1; }
+
+TEXT="$("$EXPORT" --format text --readable --days "$DAYS" 2>/dev/null || true)"
+[ -n "$TEXT" ] || { echo "no text captured in the last $DAYS days." >&2; exit 1; }
+
+read -r -d '' PROMPT <<'EOF' || true
+You are a multilingual writing coach. Below is raw text a user typed across apps
+over the last few days, captured by a personal keystroke logger. It is noisy:
+edits appear as <DEL>, Enter as <RET>, and it includes terminal commands, code,
+and fragments. IGNORE commands/code/noise; focus on natural-language sentences
+the person actually wrote (messages, notes, prose).
+
+Write a concise report (~400 words) with these sections:
+
+## English
+- Phrases that sound non-native or awkward → a more natural rewrite.
+- 5 vocabulary upgrades (word they used → stronger/more precise alternative).
+- Recurring grammar or punctuation issues, each with the rule + a short example.
+
+## Portuguese (native)
+- Awkward phrasing, spelling/acentuação slips, punctuation, register issues.
+
+## German (learning)
+- 10 useful words/phrases to learn next, chosen to match the topics they write
+  about: German — English gloss — a short example sentence.
+- Gently correct any German they wrote.
+
+## Topics to study
+- 3–5 recurring themes in their writing + one concrete study action each.
+
+Be specific and quote their own text where useful.
+
+--- USER TEXT (last DAYS_PLACEHOLDER days) ---
+EOF
+PROMPT="${PROMPT/DAYS_PLACEHOLDER/$DAYS}"
+
+if command -v claude >/dev/null 2>&1; then
+    printf '%s' "$TEXT" | claude -p "$PROMPT"
+else
+    echo "# claude CLI not found — paste the following into Claude:"
+    echo
+    printf '%s\n\n%s\n' "$PROMPT" "$TEXT"
+fi

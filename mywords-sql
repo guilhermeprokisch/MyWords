@@ -1,0 +1,36 @@
+#!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Guilherme Prokisch
+# mywords-sql — query the encrypted MyWords database from the terminal.
+#
+# Usage:
+#   ./mywords-sql "SELECT app_name, count(*) FROM keystrokes GROUP BY app_name"
+#   ./mywords-sql                 # interactive SQLCipher shell
+#
+# The passphrase is read from the Keychain (macOS asks you to Allow the first
+# time — click "Always Allow"). Results print to the terminal only; nothing is
+# written to disk. Columns: id, ts, app_name, app_bundle, text.
+set -euo pipefail
+
+DB="${MYWORDS_DB:-$HOME/Library/Application Support/MyWords/keystrokes.db}"
+SQLCIPHER="$(command -v sqlcipher || echo /opt/homebrew/opt/sqlcipher/bin/sqlcipher)"
+
+[ -x "$SQLCIPHER" ] || { echo "sqlcipher CLI not found — run 'brew install sqlcipher'." >&2; exit 1; }
+[ -f "$DB" ]        || { echo "no database at $DB — has MyWords recorded anything yet?" >&2; exit 1; }
+
+PASS="$(security find-generic-password -s com.mywords.logger -a db-passphrase -w)" \
+    || { echo "could not read the passphrase from the Keychain." >&2; exit 1; }
+PASS_ESC="${PASS//\'/\'\'}"   # escape single quotes for the SQL literal
+
+# PRAGMA key must run first; its "ok" is muted so only real output shows.
+PREAMBLE=$(printf ".output /dev/null\nPRAGMA key='%s';\n.output stdout\n.mode box\n.headers on\n" "$PASS_ESC")
+
+if [ $# -gt 0 ]; then
+    # One-off query — key goes via stdin, never argv (so it can't leak to `ps`).
+    printf '%s\n%s;\n' "$PREAMBLE" "$*" | "$SQLCIPHER" "$DB"
+else
+    # Interactive shell — key preloaded via a private, short-lived init file.
+    INIT="$(mktemp)"; chmod 600 "$INIT"; trap 'rm -f "$INIT"' EXIT
+    printf '%s\n' "$PREAMBLE" > "$INIT"
+    "$SQLCIPHER" -init "$INIT" "$DB"
+fi

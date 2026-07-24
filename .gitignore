@@ -1,0 +1,12 @@
+.build/
+build/
+*.xcodeproj
+.DS_Store
+
+# Local assistant/editor config (may contain machine-specific paths)
+.claude/
+
+# Decrypted exports — plaintext, never commit these
+corpus.*
+*.jsonl
+
