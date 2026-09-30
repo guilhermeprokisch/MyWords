@@ -132,4 +132,24 @@ final class RoundTripTests: XCTestCase {
         let original = "héllo\tworld\n"
         XCTAssertEqual(try crypto.decrypt(try crypto.encrypt(original)), original)
     }
+
+    func testEmptyLegacyFileDoesNotBlockStartup() throws {
+        // A zero-byte keystrokes.sqlite (no `keystrokes` table) used to make the
+        // migration throw, so the app never opened its database at all.
+        let url = tempDBURL()
+        let dir = url.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let db = try Database(path: url, passphrase: pass)
+        let legacy = dir.appendingPathComponent("keystrokes.sqlite")
+        FileManager.default.createFile(atPath: legacy.path, contents: Data())
+
+        let migrated = try Migrator.migrateIfNeeded(
+            legacyPath: legacy,
+            legacyKey: SymmetricKey(size: .bits256),
+            newDB: db
+        )
+        XCTAssertEqual(migrated, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path), "legacy file should be retired")
+    }
 }

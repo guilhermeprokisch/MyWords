@@ -18,6 +18,16 @@ enum LegacyStore {
         }
         defer { sqlite3_close(db) }
 
+        // An empty or foreign file (e.g. a zero-byte keystrokes.sqlite) has no
+        // `keystrokes` table: nothing to migrate, rather than a fatal error.
+        var probe: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'keystrokes';", -1, &probe, nil) == SQLITE_OK else {
+            throw MigrationError.message("read legacy DB: \(String(cString: sqlite3_errmsg(db)))")
+        }
+        let hasTable = sqlite3_step(probe) == SQLITE_ROW
+        sqlite3_finalize(probe)
+        guard hasTable else { return [] }
+
         let sql = "SELECT id, ts, app_name, app_bundle, text_cipher FROM keystrokes ORDER BY ts ASC;"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
